@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -31,46 +32,53 @@ func main() {
 }
 
 func exchange(connections map[int]net.Conn, n int) {
+
 	connect := connections[n]
 
-	var clientNo int
-
-	buf := make([]byte, 256)
-
-	fmt.Println("Accept connection:", n)
+	// Closes the connection.
 	defer connect.Close()
 
-	for {
-		read_len, err := connections[n].Read(buf)
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		var message string
-		message = string(buf[:read_len])
-
-		_, err = fmt.Sscanf(message, "%d", &clientNo)
-		if err != nil {
-			connect.Write([]byte("error format message\n"))
-			continue
-		}
-		pos := strings.Index(message, " ")
-		if pos > 0 {
-			out_message := message[pos+1:]
-
-			connect = connections[clientNo]
-			if connect == nil {
-				connections[n].Write([]byte("client is close"))
-				continue
-			}
-
-			out_buf := []byte(fmt.Sprintf("%d->>%s\n", clientNo, out_message))
-
-			_, err := connect.Write(out_buf)
-			if err != nil {
-				fmt.Println("Error:", err.Error())
-				break
-			}
-		}
+	// Sending the ID to the user.
+	num := []byte("Ваш ID: " + strconv.Itoa(n))
+	_, err := connect.Write(num)
+	if err != nil {
+		fmt.Println(err)
 	}
+	fmt.Println("Подключисля юзер с ID: ", n)
+
+	for {
+		forWhom, fromWhom, message := breakingTheMessage(connections, n)
+		connections[forWhom].Write([]byte(fmt.Sprintf("%d ->> %s", fromWhom, message)))
+	}
+}
+
+func breakingTheMessage(connections map[int]net.Conn, n int) (forWhom, fromWhom int, b []byte) {
+	// Reading the message.
+	buf := make([]byte, 256)
+	read_len, err := connections[n].Read(buf)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	// We remove all unnecessary things.
+	var message string
+	message = string(buf[:read_len])
+
+	// Convert the received message, split it into recipient_message_sender.
+	text := strings.Split(message, " ")
+
+	forWhom, err = strconv.Atoi(text[0])
+	if err != nil {
+		log.Println("Не удалось преобразовать text[0] в forWhom", err)
+	}
+	fromWhom, err = strconv.Atoi(strings.Trim(text[len(text)-1], "\r"))
+	if err != nil {
+		log.Println("Не удалось преобразовать text[len(text)-1] в fromWhom", err)
+	}
+
+	mes := strings.TrimLeft(message, text[0])
+	mes = strings.TrimRight(mes, text[len(text)-1])
+	mes = strings.TrimSpace(mes)
+
+	return forWhom, fromWhom, []byte(mes)
 }
