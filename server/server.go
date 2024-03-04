@@ -4,81 +4,93 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"strconv"
 	"strings"
+	"sync"
 )
 
+type Client struct {
+	conn  net.Conn
+	login string
+}
+
 func main() {
-	connections := make(map[int]net.Conn, 1024)
-	i := 0
-
-	listening, err := net.Listen("tcp", ":8080")
+	clients := make(map[string]*Client)
+	listener, err := net.Listen("tcp", ":8080")
 	if err != nil {
-		log.Fatal("Error: %s", err)
+		log.Fatal("Ошибка при прослушивании: ", err)
 	}
+	defer listener.Close()
 
-	fmt.Println("Server start!!!")
+	fmt.Println("Сервер запущен!!!")
+
+	var wg sync.WaitGroup
 
 	for {
-		connect, err := listening.Accept()
+		connect, err := listener.Accept()
 		if err != nil {
-			fmt.Print("Error: %s", err)
+			log.Println("Ошибка при принятии подключения: ", err)
+			continue
 		}
-		connections[i] = connect
 
-		go exchange(connections, i)
-		i++
+		wg.Add(1)
+		go handleConnection(connect, clients, &wg)
 	}
 }
 
-func exchange(connections map[int]net.Conn, n int) {
-
-	connect := connections[n]
-
-	// Closes the connection.
+func handleConnection(connect net.Conn, clients map[string]*Client, wg *sync.WaitGroup) {
 	defer connect.Close()
+	defer wg.Done()
 
-	// Sending the ID to the user.
-	num := []byte("Ваш ID: " + strconv.Itoa(n))
-	_, err := connect.Write(num)
+	buf := make([]byte, 256)
+	readLen, err := connect.Read(buf)
 	if err != nil {
-		fmt.Println(err)
+		log.Println("Ошибка при чтении логина: ", err)
+		return
 	}
-	fmt.Println("Подключисля юзер с ID: ", n)
+
+	login := strings.TrimSpace(string(buf[:readLen]))
+
+	if _, exists := clients[login]; exists {
+		connect.Write([]byte("Логин уже занят\n"))
+		return
+	}
+
+	client := &Client{conn: connect, login: login}
+	clients[login] = client
+
+	connect.Write([]byte("Подключение выполнено. Ваш логин: " + login + "\n"))
+
+	fmt.Println("Новый клиент подключен. Логин:", login)
 
 	for {
-		forWhom, fromWhom, message := breakingTheMessage(connections, n)
-		connections[forWhom].Write([]byte(fmt.Sprintf("%d ->> %s", fromWhom, message)))
+		readLen, err := connect.Read(buf)
+		if err != nil {
+			log.Println("Ошибка при чтении сообщения: ", err)
+			delete(clients, login)
+			break
+		}
+
+		message := string(buf[:readLen])
+		fmt.Println("Получено сообщение от", login+":", message)
+
+		parts := strings.Fields(message)
+		if len(parts) < 2 {
+			fmt.Println("Неправильный формат сообщения")
+			continue
+		}
+
+		receiverLogin := parts[0]
+		messageToSend := strings.Join(parts[1:], " ")
+
+		receiverClient, exists := clients[receiverLogin]
+		if !exists {
+			fmt.Println("Пользователь с логином", receiverLogin, "не найден")
+			continue
+		}
+
+		_, err = receiverClient.conn.Write([]byte(fmt.Sprintf("Сообщение от %s: %s\n", login, messageToSend)))
+		if err != nil {
+			fmt.Println("Ошибка при отправке сообщения клиенту", receiverLogin, ":", err)
+		}
 	}
-}
-
-func breakingTheMessage(connections map[int]net.Conn, n int) (forWhom, fromWhom int, b []byte) {
-	// Reading the message.
-	buf := make([]byte, 256)
-	read_len, err := connections[n].Read(buf)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	// We remove all unnecessary things.
-	var message string
-	message = string(buf[:read_len])
-
-	// Convert the received message, split it into recipient_message_sender.
-	text := strings.Split(message, " ")
-
-	forWhom, err = strconv.Atoi(text[0])
-	if err != nil {
-		log.Println("Не удалось преобразовать text[0] в forWhom", err)
-	}
-	fromWhom, err = strconv.Atoi(strings.Trim(text[len(text)-1], "\r"))
-	if err != nil {
-		log.Println("Не удалось преобразовать text[len(text)-1] в fromWhom", err)
-	}
-
-	mes := strings.TrimLeft(message, text[0])
-	mes = strings.TrimRight(mes, text[len(text)-1])
-	mes = strings.TrimSpace(mes)
-
-	return forWhom, fromWhom, []byte(mes)
 }
