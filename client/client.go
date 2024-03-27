@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 
 	"github.com/lxn/walk"
@@ -50,7 +51,11 @@ func (c *Client) sendMessage() {
 		msg := c.sendTE.Text()
 		if msg != "" {
 			if c.encryptCb.Checked() {
-				key := parseKey(c.keyEdit.Text())
+				key, err := parseKey(c.keyEdit.Text())
+				if err != nil {
+					walk.MsgBox(c.mainWindow, "Ошибка", "Неверный ключ шифрования: "+err.Error(), walk.MsgBoxIconError)
+					return
+				}
 				msg = permute(msg, key, true)
 			}
 			_, err := c.conn.Write([]byte(c.username.Text() + ": " + msg))
@@ -74,7 +79,11 @@ func (c *Client) readLoop() {
 		}
 		msg := string(buf[:n])
 		if c.encryptCb.Checked() {
-			key := parseKey(c.keyEdit.Text())
+			key, err := parseKey(c.keyEdit.Text())
+			if err != nil {
+				walk.MsgBox(c.mainWindow, "Ошибка", "Неверный ключ шифрования: "+err.Error(), walk.MsgBoxIconError)
+				return
+			}
 			msgParts := strings.SplitN(msg, ": ", 2)
 			if len(msgParts) == 2 {
 				msg = msgParts[0] + ": " + permute(msgParts[1], key, false)
@@ -96,16 +105,27 @@ func (c *Client) updateUI() {
 	}
 }
 
-func parseKey(keyStr string) []int {
+func parseKey(keyStr string) ([]int, error) {
 	keyStr = strings.TrimSpace(keyStr)
-	parts := strings.Fields(keyStr)
-	key := make([]int, len(parts))
-	for i, part := range parts {
-		var num int
-		fmt.Sscanf(part, "%d", &num)
+	key := make([]int, len(keyStr))
+	seen := make(map[int]bool)
+
+	for i, char := range keyStr {
+		num, err := strconv.Atoi(string(char))
+		if err != nil {
+			return nil, fmt.Errorf("Недопустимый ключ: %w", err)
+		}
+		if num < 1 || num > len(keyStr) {
+			return nil, fmt.Errorf("Недопустимый ключ: число %d больше чем длина ключа", num)
+		}
+		if seen[num] {
+			return nil, fmt.Errorf("Недопустимый ключ: число %d не уникальное", num)
+		}
+		seen[num] = true
 		key[i] = num
 	}
-	return key
+
+	return key, nil
 }
 
 func permute(text string, key []int, encrypt bool) string {
@@ -151,9 +171,9 @@ func main() {
 			Composite{
 				Layout: HBox{},
 				Children: []Widget{
-					LineEdit{AssignTo: &client.serverIP, Text: "127.0.0.1"},
-					LineEdit{AssignTo: &client.serverPort, Text: "8080"},
-					LineEdit{AssignTo: &client.username, Text: "User"},
+					LineEdit{AssignTo: &client.serverIP, Text: "IP"},
+					LineEdit{AssignTo: &client.serverPort, Text: "Port"},
+					LineEdit{AssignTo: &client.username, Text: "UserName"},
 					PushButton{
 						AssignTo: &client.connectBtn,
 						Text:     "Подключиться",
@@ -176,7 +196,7 @@ func main() {
 					},
 					LineEdit{
 						AssignTo: &client.keyEdit,
-						Text:     "4 2 1 3",
+						Text:     "Ключ",
 					},
 				},
 			},

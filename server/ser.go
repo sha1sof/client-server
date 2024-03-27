@@ -36,7 +36,7 @@ func (s *Server) Start() error {
 
 	s.ln = ln
 
-	fmt.Printf("Сервер запущен и прослушивает соединения на %s\n", ln.Addr())
+	fmt.Printf("Сервер запущен!\nАдрес: %s\n", ln.Addr())
 
 	go s.acceptLoop()
 
@@ -54,7 +54,7 @@ func (s *Server) acceptLoop() {
 			continue
 		}
 
-		fmt.Println("Новое подключение к серверу:", conn.RemoteAddr())
+		fmt.Println("Новое подключение:", conn.RemoteAddr())
 
 		s.connections.Store(conn, struct{}{})
 
@@ -97,12 +97,10 @@ func (s *Server) Broadcast(msg []byte) {
 
 func main() {
 	server := NewServer("127.0.0.1:8080")
-	log.Println("Сервер начал работу!")
 
 	go func() {
 		for msg := range server.msgch {
 			fmt.Printf("(%s): %s\n", msg.from, string(msg.payload))
-			// Отправляем только msg.payload, без msg.from
 			server.Broadcast(msg.payload)
 		}
 	}()
